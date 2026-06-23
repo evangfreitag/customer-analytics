@@ -1,0 +1,1 @@
+RFM segmentation analysis. See notebooks/03_rfm_segmentation.ipynb

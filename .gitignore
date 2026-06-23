@@ -172,6 +172,11 @@ venv.bak/
 # mkdocs documentation
 /site
 
+# MLFlow Arttifacts
+mlartifacts/
+artifacts/
+outputs/
+
 # mypy
 .mypy_cache/
 .dmypy.json

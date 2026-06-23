@@ -1,0 +1,167 @@
+name: Model CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MODEL_NAME: customer-clv-bgnbd
+
+jobs:
+  # ── Job 1: Code Quality & Tests ─────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --tb=short
+
+      - name: Check code style
+        run: |
+          pip install flake8
+          flake8 src/ --max-line-length=100 --ignore=E203,W503
+
+  # ── Job 2: Data Validation ───────────────────────────────────────────────────
+  validate_data:
+    name: Validate Input Data
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run data validation
+        run: python scripts/validate_data.py
+
+  # ── Job 3: Train & Log Model ─────────────────────────────────────────────────
+  train:
+    name: Train and Log Model
+    runs-on: ubuntu-latest
+    needs: validate_data
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train model and log to MLflow
+        run: python scripts/train.py
+
+      - name: Upload model artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-artifacts
+          path: artifacts/
+
+  # ── Job 4: Model Validation ──────────────────────────────────────────────────
+  validate_model:
+    name: Validate Model Performance
+    runs-on: ubuntu-latest
+    needs: train
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download model artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: model-artifacts
+          path: artifacts/
+
+      - name: Run model validation
+        run: python scripts/validate_model.py
+
+  # ── Job 5: Promote to Staging ────────────────────────────────────────────────
+  promote_staging:
+    name: Promote to Staging
+    runs-on: ubuntu-latest
+    needs: validate_model
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Promote model to Staging
+        run: |
+          python scripts/promote_model.py \
+            --model-name $MODEL_NAME \
+            --to-stage Staging
+
+  # ── Job 6: Promote to Production (manual approval required) ──────────────────
+  promote_production:
+    name: Promote to Production
+    runs-on: ubuntu-latest
+    needs: promote_staging
+    environment: production  # Requires manual approval in GitHub settings
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Promote model to Production
+        run: |
+          python scripts/promote_model.py \
+            --model-name $MODEL_NAME \
+            --to-stage Production
+
+      - name: Run post-deployment smoke test
+        run: python scripts/smoke_test.py
